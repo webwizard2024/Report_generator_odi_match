@@ -10,6 +10,7 @@ import base64
 import os
 import unicodedata
 import plotly.io as pio
+import streamlit.components.v1 as components
 
 # ---- Load environment variables ----
 load_dotenv()
@@ -204,52 +205,55 @@ if generate and query:
         st.stop()
 
     # ---- Generate PDF ----
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, "ODI Cricket Match Report", ln=True, align="C")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", "B", 16)
+        pdf.cell(0, 10, "ODI Cricket Match Report", ln=True, align="C")
 
-    pdf.set_font("Arial", size=12)
-    pdf.ln(4)
-    pdf.multi_cell(0, 8, f"Query: {clean_text(query)}")
+        pdf.set_font("Arial", size=12)
+        pdf.ln(4)
+        pdf.multi_cell(0, 8, f"Query: {clean_text(query)}")
 
-    pdf.ln(2)
-    pdf.set_font("Courier", size=10)
-    pdf.multi_cell(0, 7, "JSON Output:\n" + clean_text(json.dumps(chart_info, indent=2)))
+        pdf.ln(2)
+        pdf.set_font("Courier", size=10)
+        pdf.multi_cell(0, 7, "JSON Output:\n" + clean_text(json.dumps(chart_info, indent=2)))
 
-    pdf.ln(4)
-    pdf.image(chart_path, x=30, w=150)
+        pdf.ln(4)
+        pdf.image(chart_path, x=30, w=150)
 
-    pdf.ln(8)
-    pdf.set_font("Arial", size=12)
-    pdf.multi_cell(0, 8, "Equivalent Python Code:")
+        pdf.ln(8)
+        pdf.set_font("Arial", size=12)
+        pdf.multi_cell(0, 8, "Equivalent Python Code:")
 
-    pdf.set_font("Courier", size=8)
-    for line in clean_text(code_example).splitlines():
-        pdf.multi_cell(0, 5, line)
+        pdf.set_font("Courier", size=8)
+        for line in clean_text(code_example).splitlines():
+            pdf.multi_cell(0, 5, line)
 
-    pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
+        pdf.output(pdf_file.name)
+        pdf_path = pdf_file.name
 
-    # ---- Display PDF in App (Fixed Preview) ----
-    st.markdown("<br>", unsafe_allow_html=True)
+    # ---- Chrome-Safe PDF Preview ----
     st.subheader("📄 PDF Preview")
-
-    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
-    pdf_data_uri = f"data:application/pdf;base64,{base64_pdf}"
-    st.markdown(
-        f'<iframe src="{pdf_data_uri}" width="100%" height="700" type="application/pdf"></iframe>',
-        unsafe_allow_html=True,
-    )
+    with open(pdf_path, "rb") as f:
+        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+    pdf_html = f"""
+    <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700px"></iframe>
+    """
+    components.html(pdf_html, height=720, scrolling=True)
 
     # ---- Download Button ----
-    st.download_button(
-        label="📥 Download PDF Report",
-        data=pdf_output,
-        file_name="ODI_Match_Report.pdf",
-        mime="application/pdf",
-    )
+    with open(pdf_path, "rb") as f:
+        st.download_button(
+            label="📥 Download PDF Report",
+            data=f,
+            file_name="ODI_Match_Report.pdf",
+            mime="application/pdf",
+        )
 
+    # ---- Cleanup ----
     try:
         os.remove(chart_path)
+        os.remove(pdf_path)
     except Exception:
         pass
