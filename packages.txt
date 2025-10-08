@@ -1,0 +1,10 @@
+chromium
+libglib2.0-0
+libnss3
+libxss1
+libatk1.0-0
+libgconf-2-4
+fonts-liberation
+libasound2
+libx11-6
+libxcb1
