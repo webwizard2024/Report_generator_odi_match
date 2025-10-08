@@ -1,4 +1,0 @@
-google-chrome-stable
-libgl1
-libglib2.0-0
-
