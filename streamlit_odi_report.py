@@ -9,9 +9,14 @@ import tempfile
 import base64
 import os
 import unicodedata
+import plotly.io as pio
 
 # ---- Load environment variables ----
 load_dotenv()
+
+# ---- Fix for Kaleido Deprecation ----
+pio.kaleido.scope.default_format = "png"
+pio.kaleido.scope.default_scale = 2
 
 # ---- Page Configuration ----
 st.set_page_config(page_title="🏏 ODI Match Report Generator", page_icon="🏏", layout="centered")
@@ -146,7 +151,7 @@ if generate and query:
         st.error("⚠️ JSON must include x, y, and chart_type.")
         st.stop()
 
-    # 🔹 Auto-correct if model outputs wrong column like 'team' instead of 'team1' or 'team2'
+    # 🔹 Auto-correct column names
     if x not in available_cols:
         if "team" in x.lower():
             x = "team1"
@@ -191,12 +196,11 @@ if generate and query:
 
     # ---- Save Chart as Image ----
     try:
-        import kaleido  # Ensure kaleido is available
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-            fig.write_image(tmpfile.name, scale=2)
+            fig.write_image(tmpfile.name)
             chart_path = tmpfile.name
     except Exception as e:
-        st.error(f"⚠️ Error saving chart image (Kaleido). {e}")
+        st.error(f"⚠️ Error saving chart image (Kaleido): {e}")
         st.stop()
 
     # ---- Generate PDF ----
@@ -226,13 +230,18 @@ if generate and query:
 
     pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-    # ---- Display PDF in App ----
+    # ---- Display PDF in App (Fixed Preview) ----
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📄 PDF Preview")
-    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
-    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700"></iframe>'
-    st.markdown(pdf_display, unsafe_allow_html=True)
 
+    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
+    pdf_data_uri = f"data:application/pdf;base64,{base64_pdf}"
+    st.markdown(
+        f'<iframe src="{pdf_data_uri}" width="100%" height="700" type="application/pdf"></iframe>',
+        unsafe_allow_html=True,
+    )
+
+    # ---- Download Button ----
     st.download_button(
         label="📥 Download PDF Report",
         data=pdf_output,
