@@ -236,40 +236,37 @@ if generate and query:
 
     pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-   
-    # ---- PDF Preview (Chrome-safe + Instant Load) ----
-st.markdown("<br>", unsafe_allow_html=True)
-st.subheader("📄 PDF Preview")
+    # ---- PDF Preview (Chrome-safe) ----
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.subheader("📄 PDF Preview")
 
-# Save PDF to a temporary file
-with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-    tmp_pdf.write(pdf_output)
-    tmp_pdf_path = tmp_pdf.name
+    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
+    iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
+    st.markdown(iframe_html, unsafe_allow_html=True)
 
-# Embed PDF inside the app
-with open(tmp_pdf_path, "rb") as f:
-    base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+    st.markdown(
+        """
+        <div style="margin-top:8px;">
+            If the embedded preview is blocked by your browser, click below to open the PDF in a new tab:
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
-st.markdown(iframe_html, unsafe_allow_html=True)
+    open_link_html = f'''
+        <a href="data:application/pdf;base64,{base64_pdf}" target="_blank" rel="noopener noreferrer"
+           style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
+            🔍 Open PDF in new tab
+        </a>
+        '''
+    st.markdown(open_link_html, unsafe_allow_html=True)
 
-# Open PDF in new tab (now works instantly)
-pdf_url = f"file://{tmp_pdf_path}"
-open_link_html = f'''
-    <a href="{pdf_url}" target="_blank" rel="noopener noreferrer"
-       style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
-        🔍 Open PDF in new tab
-    </a>
-'''
-st.markdown(open_link_html, unsafe_allow_html=True)
-
-# Download button
-st.download_button(
-    label="📥 Download PDF Report",
-    data=pdf_output,
-    file_name="ODI_Match_Report.pdf",
-    mime="application/pdf",
-)
+    st.download_button(
+        label="📥 Download PDF Report",
+        data=pdf_output,
+        file_name="ODI_Match_Report.pdf",
+        mime="application/pdf",
+    )
 
     try:
         os.remove(chart_path)
