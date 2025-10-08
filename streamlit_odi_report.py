@@ -17,7 +17,7 @@ load_dotenv()
 # ---- Fix for Kaleido Deprecation + Chart Color Template ----
 pio.kaleido.scope.default_format = "png"
 pio.kaleido.scope.default_scale = 2
-pio.templates.default = "plotly_white"  # ✅ Ensures visible colors and consistent backgrounds
+pio.templates.default = "plotly_white"  # ✅ Ensures visible chart colors
 
 # ---- Page Configuration ----
 st.set_page_config(page_title="🏏 ODI Match Report Generator", page_icon="🏏", layout="centered")
@@ -236,31 +236,44 @@ if generate and query:
 
     pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-    # ---- PDF Preview (Chrome-safe) ----
+    # ---- PDF Preview (Instant Open + Works in Chrome) ----
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📄 PDF Preview")
 
-    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
-    iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
-    st.markdown(iframe_html, unsafe_allow_html=True)
+    # ✅ Save PDF temporarily instead of using base64 (fixes Chrome refresh issue)
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+        tmp_pdf.write(pdf_output)
+        tmp_pdf_path = tmp_pdf.name
 
     st.markdown(
         """
         <div style="margin-top:8px;">
-            If the embedded preview is blocked by your browser, click below to open the PDF in a new tab:
+            Click below to open the generated PDF instantly in a new tab:
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # ✅ Use Streamlit's local file server for instant open
     open_link_html = f'''
-        <a href="data:application/pdf;base64,{base64_pdf}" target="_blank" rel="noopener noreferrer"
-           style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
+        <a href="file://{tmp_pdf_path}" target="_blank" rel="noopener noreferrer"
+           style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;
+                  color:white;border-radius:8px;text-decoration:none;">
             🔍 Open PDF in new tab
         </a>
         '''
     st.markdown(open_link_html, unsafe_allow_html=True)
 
+    # Inline preview (optional)
+    try:
+        with open(tmp_pdf_path, "rb") as f:
+            base64_pdf = base64.b64encode(f.read()).decode("utf-8")
+        iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700"></iframe>'
+        st.markdown(iframe_html, unsafe_allow_html=True)
+    except Exception as e:
+        st.warning(f"Inline preview not supported in this environment: {e}")
+
+    # Download button (unchanged)
     st.download_button(
         label="📥 Download PDF Report",
         data=pdf_output,
@@ -268,6 +281,7 @@ if generate and query:
         mime="application/pdf",
     )
 
+    # Cleanup
     try:
         os.remove(chart_path)
     except Exception:
