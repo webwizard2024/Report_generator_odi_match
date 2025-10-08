@@ -2,90 +2,265 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from fpdf import FPDF
-import plotly.io as pio
-import os
+from langchain.chat_models import init_chat_model
+from dotenv import load_dotenv
+import json
 import tempfile
 import base64
+import os
+import unicodedata
+import plotly.io as pio
+import subprocess
 
-# --- ✅ Fix Kaleido + Chrome compatibility ---
+# ---- Load environment variables ----
+load_dotenv()
+
+# ---- Streamlit Page Config ----
+st.set_page_config(page_title="ODI Match Report", page_icon="🏏", layout="centered")
+
+# ---- Initialize Model ----
 try:
-    from plotly.io._kaleido import scope
-    scope.chromium_args = ["--no-sandbox", "--disable-dev-shm-usage"]
+    model = init_chat_model("llama-3.1-8b-instant", model_provider="groq")
 except Exception as e:
-    print("⚠️ Kaleido init skipped:", e)
+    st.error(f"⚠️ Failed to initialize model. Check your GROQ_API_KEY. Error: {e}")
+    st.stop()
 
-pio.renderers.default = "kaleido"
-
-# --- Optional fallback path for Streamlit Cloud ---
-if os.path.exists("/usr/bin/google-chrome"):
-    os.environ["CHROME_PATH"] = "/usr/bin/google-chrome"
-
-# ---- Streamlit App ----
-st.set_page_config(page_title="ODI Match Report", page_icon="📊", layout="centered")
-
-st.markdown("<h1 style='text-align: center; color: #003366;'>📊 ODI Match Report Generator</h1>", unsafe_allow_html=True)
-
-# ---- Upload dataset ----
-uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
-if uploaded_file:
-    df = pd.read_csv(uploaded_file)
-    st.success("✅ File uploaded successfully!")
-
-    # ---- Display Data ----
-    st.subheader("📋 Uploaded Data")
-    st.dataframe(df.head())
-
-    # ---- Generate Plotly Chart ----
-    st.subheader("📈 Run Rate Comparison")
-    if 'Team' in df.columns and 'RunRate' in df.columns:
-        fig = px.bar(df, x='Team', y='RunRate', color='Team', title="Run Rate per Team",
-                     color_discrete_sequence=px.colors.qualitative.Set3)
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- ✅ Save chart image (Fixed Kaleido) ---
-        chart_path = os.path.join(tempfile.gettempdir(), "chart.png")
-        try:
-            fig.write_image(chart_path)
-        except Exception as e:
-            st.warning(f"⚠️ Error saving chart image: {e}")
-            chart_path = None
-
-        # ---- Generate PDF ----
-        st.subheader("🧾 Generate PDF Report")
-
-        if st.button("Create PDF Report"):
-            pdf = FPDF()
-            pdf.add_page()
-            pdf.set_font("Arial", 'B', 16)
-            pdf.cell(200, 10, txt="ODI Match Report", ln=True, align='C')
-            pdf.ln(10)
-
-            pdf.set_font("Arial", '', 12)
-            pdf.cell(0, 10, txt="Team Performance Summary", ln=True)
-
-            if chart_path and os.path.exists(chart_path):
-                pdf.image(chart_path, x=25, y=40, w=160)
-                pdf.ln(90)
-
-            # Add some data summary
-            pdf.set_font("Arial", '', 11)
-            summary_text = f"Total Teams: {df['Team'].nunique()} | Average Run Rate: {df['RunRate'].mean():.2f}"
-            pdf.cell(0, 10, txt=summary_text, ln=True)
-
-            pdf_output_path = os.path.join(tempfile.gettempdir(), "ODI_Match_Report.pdf")
-            pdf.output(pdf_output_path)
-
-            # ---- Display PDF Preview ----
-            with open(pdf_output_path, "rb") as f:
-                pdf_bytes = f.read()
-
-            b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-            pdf_display = f'<iframe src="data:application/pdf;base64,{b64_pdf}" width="700" height="800" type="application/pdf"></iframe>'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-
-            st.success("✅ PDF generated successfully!")
-
-    else:
-        st.error("❌ Required columns 'Team' and 'RunRate' not found in dataset.")
+# ---- Load Dataset ----
+if os.path.exists("ODI_Match_info.csv"):
+    df = pd.read_csv("ODI_Match_info.csv")
 else:
-    st.info("📂 Please upload your CSV file to generate the report.")
+    uploaded = st.file_uploader("📂 Upload ODI_Match_info.csv", type=["csv"])
+    if uploaded:
+        df = pd.read_csv(uploaded)
+    else:
+        st.warning("Please upload the ODI_Match_info.csv file to continue.")
+        st.stop()
+
+# ---- Custom CSS ----
+st.markdown(
+    """
+    <style>
+    .main { background-color: #f8fafc; }
+    .report-card {
+        background-color: white;
+        padding: 2.0rem 2rem;
+        border-radius: 14px;
+        box-shadow: 0px 6px 20px rgba(16,24,40,0.06);
+        width: 82%;
+        margin: auto;
+    }
+    .stTextInput > div > div > input {
+        border: 1px solid #e6e9ef;
+        border-radius: 10px;
+        padding: 14px;
+        font-size: 16px;
+    }
+    .stButton > button {
+        width: 100%;
+        border-radius: 10px;
+        height: 3rem;
+        font-size: 1.05rem;
+        font-weight: 700;
+        background-color: #0d6efd;
+        color: white;
+        border: none;
+        transition: all 0.12s ease-in-out;
+    }
+    .stButton > button:hover { background-color: #084298; transform: translateY(-1px); }
+    h1 { text-align: center; color: #0d6efd; font-weight: 800; margin-bottom: 0.3rem; }
+    .subtext { text-align: center; font-size: 1rem; color: #6c757d; margin-bottom: 1.6rem; }
+    iframe { border-radius: 12px; border: 2px solid #eee; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---- Helper: Clean text ----
+def clean_text(text):
+    if not isinstance(text, str):
+        text = str(text)
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+
+# ---- Helper: Parse JSON ----
+def parse_model_json(raw):
+    try:
+        return json.loads(raw.strip())
+    except Exception:
+        try:
+            return json.loads(raw.split("```json")[1].split("```")[0])
+        except Exception:
+            start = raw.find("{")
+            end = raw.rfind("}")
+            if start != -1 and end != -1:
+                try:
+                    return json.loads(raw[start:end+1])
+                except Exception:
+                    return None
+            return None
+
+# ---- UI Layout ----
+st.markdown("<div class='report-card'>", unsafe_allow_html=True)
+st.markdown("<h1>🏏 ODI Cricket Match Report Generator</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtext'>Type a natural language query. The app will build a chart and generate a PDF report.</p>", unsafe_allow_html=True)
+
+query = st.text_input("💬 Enter your query (e.g. *Show total toss wins by team in a pie chart*)")
+generate = st.button("🚀 Generate Report")
+
+st.markdown("</div>", unsafe_allow_html=True)
+
+# ---- Example Code ----
+code_example = """
+import pandas as pd
+import plotly.express as px
+
+df = pd.read_csv('ODI_Match_info.csv')
+data = df['player_of_match'].value_counts().reset_index()
+data.columns = ['player_of_match', 'count']
+fig = px.bar(data, x='player_of_match', y='count', title='Most Common Player of the Match')
+fig.show()
+"""
+
+if generate and query:
+    prompt = f"""
+    You are a data visualization assistant.
+    Dataset columns: ['team1', 'team2', 'toss_winner', 'winner', 'player_of_match', 'season'].
+    Based on this query: "{query}", return ONLY valid JSON (no explanation, no code).
+    JSON must have keys: x, y, chart_type, and optional limit.
+    """
+
+    try:
+        response = model.invoke(input=prompt)
+        raw_response = getattr(response, "content", str(response))
+        chart_info = parse_model_json(raw_response)
+    except Exception as e:
+        st.error(f"Model request failed: {e}")
+        st.stop()
+
+    if not chart_info:
+        st.error("⚠️ Model output is not valid JSON. Please rephrase the query.")
+        st.stop()
+
+    x = chart_info.get("x")
+    y = chart_info.get("y")
+    chart_type = chart_info.get("chart_type")
+    limit = chart_info.get("limit", None)
+
+    if not x or not y or not chart_type:
+        st.error("⚠️ JSON must include x, y, and chart_type.")
+        st.stop()
+
+    if x not in df.columns:
+        st.error(f"⚠️ Column '{x}' not found in dataset.")
+        st.stop()
+
+    if y == "count":
+        data = df[x].value_counts().reset_index()
+        data.columns = [x, "count"]
+        if limit:
+            data = data.head(limit)
+        value_col = "count"
+    else:
+        if y not in df.columns:
+            st.error(f"⚠️ Column '{y}' not found in dataset.")
+            st.stop()
+        if pd.api.types.is_numeric_dtype(df[y]):
+            data = df.groupby(x)[y].sum().reset_index()
+            value_col = y
+            if limit:
+                data = data.sort_values(by=value_col, ascending=False).head(limit)
+        else:
+            data = df[x].value_counts().reset_index()
+            data.columns = [x, "count"]
+            value_col = "count"
+            if limit:
+                data = data.head(limit)
+
+    try:
+        if chart_type.lower() == "pie":
+            fig = px.pie(data, names=x, values=value_col, title=query)
+        else:
+            fig = px.bar(data, x=x, y=value_col, title=query, text_auto=True)
+    except Exception as e:
+        st.error(f"Error creating chart: {e}")
+        st.stop()
+
+    # ---- Kaleido + Chrome handling (robust) ----
+    try:
+        import kaleido  # ensure kaleido is installed
+    except Exception:
+        st.error("⚠️ 'kaleido' package not found. Add 'kaleido' to requirements.txt and redeploy.")
+        st.stop()
+
+    chrome_available = False
+    try:
+        # Try to get (or auto-download) Chrome for Kaleido
+        chrome_path = pio.get_chrome()
+        if chrome_path:
+            os.environ.setdefault("CHROME_EXECUTABLE", str(chrome_path))
+            chrome_available = True
+    except Exception:
+        # Try command-line helper if available
+        try:
+            subprocess.run(["plotly_get_chrome", "-y"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            chrome_path = pio.get_chrome()
+            if chrome_path:
+                os.environ.setdefault("CHROME_EXECUTABLE", str(chrome_path))
+                chrome_available = True
+        except Exception:
+            chrome_available = False
+
+    # Fallback to system chromium if present (requires packages.txt to include 'chromium')
+    if not chrome_available:
+        for exe in ("/usr/bin/chromium", "/usr/bin/chromium-browser", "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable"):
+            if os.path.exists(exe):
+                os.environ.setdefault("CHROME_EXECUTABLE", exe)
+                chrome_available = True
+                break
+
+    if not chrome_available:
+        st.error(
+            "⚠️ Kaleido needs Chrome/Chromium to export images.\n\n"
+            "Fix options:\n"
+            "1) Add 'chromium' and related libs to packages.txt and redeploy (recommended).\n"
+            "2) Allow Plotly to download Chrome by enabling downloads (pio.get_chrome())."
+        )
+        st.stop()
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as tmpfile:
+            fig.write_image(tmpfile.name, format='png', scale=2)
+            chart_path = tmpfile.name
+    except Exception as e:
+        st.error(f"⚠️ Error saving chart image with Kaleido/Chrome: {e}")
+        st.stop()
+
+    # ---- Create PDF ----
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "ODI Cricket Match Report", ln=True, align="C")
+    pdf.set_font("Arial", size=12)
+    pdf.ln(4)
+    pdf.multi_cell(0, 8, f"Query: {clean_text(query)}")
+    pdf.ln(2)
+    pdf.set_font("Courier", size=10)
+    pdf.multi_cell(0, 7, "JSON Output:\n" + clean_text(json.dumps(chart_info, indent=2)))
+    pdf.ln(4)
+    pdf.image(chart_path, x=30, w=150)
+    pdf.ln(8)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8, "Equivalent Python Code:")
+    pdf.set_font("Courier", size=8)
+    for line in clean_text(code_example).splitlines():
+        pdf.multi_cell(0, 5, line)
+
+    pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
+
+    # ---- Display PDF ----
+    st.subheader("📄 PDF Preview")
+    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
+    pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700"></iframe>'
+    st.markdown(pdf_display, unsafe_allow_html=True)
+    st.download_button("📥 Download PDF Report", pdf_output, "ODI_Match_Report.pdf", "application/pdf")
+
+    os.remove(chart_path)
