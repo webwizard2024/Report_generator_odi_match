@@ -10,12 +10,11 @@ import base64
 import os
 import unicodedata
 import plotly.io as pio
-import streamlit.components.v1 as components
 
 # ---- Load environment variables ----
 load_dotenv()
 
-# ---- Fix for Kaleido Deprecation ----
+# ---- Fix for Kaleido Deprecation (keeps write_image behavior stable) ----
 pio.kaleido.scope.default_format = "png"
 pio.kaleido.scope.default_scale = 2
 
@@ -204,56 +203,73 @@ if generate and query:
         st.error(f"⚠️ Error saving chart image (Kaleido): {e}")
         st.stop()
 
-    # ---- Generate PDF ----
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", "B", 16)
-        pdf.cell(0, 10, "ODI Cricket Match Report", ln=True, align="C")
+    # ---- Generate PDF (same logic as before) ----
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "ODI Cricket Match Report", ln=True, align="C")
 
-        pdf.set_font("Arial", size=12)
-        pdf.ln(4)
-        pdf.multi_cell(0, 8, f"Query: {clean_text(query)}")
+    pdf.set_font("Arial", size=12)
+    pdf.ln(4)
+    pdf.multi_cell(0, 8, f"Query: {clean_text(query)}")
 
-        pdf.ln(2)
-        pdf.set_font("Courier", size=10)
-        pdf.multi_cell(0, 7, "JSON Output:\n" + clean_text(json.dumps(chart_info, indent=2)))
+    pdf.ln(2)
+    pdf.set_font("Courier", size=10)
+    pdf.multi_cell(0, 7, "JSON Output:\n" + clean_text(json.dumps(chart_info, indent=2)))
 
-        pdf.ln(4)
-        pdf.image(chart_path, x=30, w=150)
+    pdf.ln(4)
+    pdf.image(chart_path, x=30, w=150)
 
-        pdf.ln(8)
-        pdf.set_font("Arial", size=12)
-        pdf.multi_cell(0, 8, "Equivalent Python Code:")
+    pdf.ln(8)
+    pdf.set_font("Arial", size=12)
+    pdf.multi_cell(0, 8, "Equivalent Python Code:")
 
-        pdf.set_font("Courier", size=8)
-        for line in clean_text(code_example).splitlines():
-            pdf.multi_cell(0, 5, line)
+    pdf.set_font("Courier", size=8)
+    for line in clean_text(code_example).splitlines():
+        pdf.multi_cell(0, 5, line)
 
-        pdf.output(pdf_file.name)
-        pdf_path = pdf_file.name
+    # produce the PDF bytes exactly like your original flow
+    pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-    # ---- Chrome-Safe PDF Preview ----
+    # ---- Display PDF Preview (minimal change + Chrome-safe fallback) ----
+    st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📄 PDF Preview")
-    with open(pdf_path, "rb") as f:
-        base64_pdf = base64.b64encode(f.read()).decode("utf-8")
-    pdf_html = f"""
-    <iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700px"></iframe>
-    """
-    components.html(pdf_html, height=720, scrolling=True)
 
-    # ---- Download Button ----
-    with open(pdf_path, "rb") as f:
-        st.download_button(
-            label="📥 Download PDF Report",
-            data=f,
-            file_name="ODI_Match_Report.pdf",
-            mime="application/pdf",
-        )
+    # base64 encode the PDF bytes
+    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
+
+    # 1) Inline iframe (keeps your original behavior; may be blocked by Chrome)
+    iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
+    st.markdown(iframe_html, unsafe_allow_html=True)
+
+    # 2) Add a visible helper link — opens the PDF in a new tab (works when iframe is blocked)
+    st.markdown(
+        """
+        <div style="margin-top:8px;">
+            If the embedded preview is blocked by your browser, <strong>click "Open PDF in new tab"</strong> below to view it:
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    open_link_html = f'''
+        <a href="data:application/pdf;base64,{base64_pdf}" target="_blank" rel="noopener noreferrer"
+           style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
+            🔍 Open PDF in new tab
+        </a>
+        '''
+    st.markdown(open_link_html, unsafe_allow_html=True)
+
+    # ---- Download Button (exactly as before) ----
+    st.download_button(
+        label="📥 Download PDF Report",
+        data=pdf_output,
+        file_name="ODI_Match_Report.pdf",
+        mime="application/pdf",
+    )
 
     # ---- Cleanup ----
     try:
         os.remove(chart_path)
-        os.remove(pdf_path)
     except Exception:
         pass
