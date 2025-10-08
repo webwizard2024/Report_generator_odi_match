@@ -14,9 +14,10 @@ import plotly.io as pio
 # ---- Load environment variables ----
 load_dotenv()
 
-# ---- Fix for Kaleido Deprecation (keeps write_image behavior stable) ----
+# ---- Fix for Kaleido Deprecation + Chart Color Template ----
 pio.kaleido.scope.default_format = "png"
 pio.kaleido.scope.default_scale = 2
+pio.templates.default = "plotly_white"  # ✅ Ensures visible colors and consistent backgrounds
 
 # ---- Page Configuration ----
 st.set_page_config(page_title="🏏 ODI Match Report Generator", page_icon="🏏", layout="centered")
@@ -194,16 +195,21 @@ if generate and query:
         st.error(f"Error creating chart: {e}")
         st.stop()
 
-    # ---- Save Chart as Image ----
+    # ---- Save Chart as Image (Color Fixed) ----
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-            fig.write_image(tmpfile.name)
+            fig.update_layout(
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                font_color="black"
+            )
+            fig.write_image(tmpfile.name, format="png", scale=2, engine="kaleido")
             chart_path = tmpfile.name
     except Exception as e:
         st.error(f"⚠️ Error saving chart image (Kaleido): {e}")
         st.stop()
 
-    # ---- Generate PDF (same logic as before) ----
+    # ---- Generate PDF ----
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", "B", 16)
@@ -228,25 +234,20 @@ if generate and query:
     for line in clean_text(code_example).splitlines():
         pdf.multi_cell(0, 5, line)
 
-    # produce the PDF bytes exactly like your original flow
     pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-    # ---- Display PDF Preview (minimal change + Chrome-safe fallback) ----
+    # ---- PDF Preview (Chrome-safe) ----
     st.markdown("<br>", unsafe_allow_html=True)
     st.subheader("📄 PDF Preview")
 
-    # base64 encode the PDF bytes
     base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
-
-    # 1) Inline iframe (keeps your original behavior; may be blocked by Chrome)
     iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
     st.markdown(iframe_html, unsafe_allow_html=True)
 
-    # 2) Add a visible helper link — opens the PDF in a new tab (works when iframe is blocked)
     st.markdown(
         """
         <div style="margin-top:8px;">
-            If the embedded preview is blocked by your browser, <strong>click "Open PDF in new tab"</strong> below to view it:
+            If the embedded preview is blocked by your browser, click below to open the PDF in a new tab:
         </div>
         """,
         unsafe_allow_html=True,
@@ -260,7 +261,6 @@ if generate and query:
         '''
     st.markdown(open_link_html, unsafe_allow_html=True)
 
-    # ---- Download Button (exactly as before) ----
     st.download_button(
         label="📥 Download PDF Report",
         data=pdf_output,
@@ -268,7 +268,6 @@ if generate and query:
         mime="application/pdf",
     )
 
-    # ---- Cleanup ----
     try:
         os.remove(chart_path)
     except Exception:
