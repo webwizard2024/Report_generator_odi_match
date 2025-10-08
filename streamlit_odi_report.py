@@ -17,7 +17,7 @@ load_dotenv()
 # ---- Fix for Kaleido Deprecation + Chart Color Template ----
 pio.kaleido.scope.default_format = "png"
 pio.kaleido.scope.default_scale = 2
-pio.templates.default = "plotly_white"  # Ensures visible colors and consistent backgrounds
+pio.templates.default = "plotly_white"  # ✅ Ensures visible colors and consistent backgrounds
 
 # ---- Page Configuration ----
 st.set_page_config(page_title="🏏 ODI Match Report Generator", page_icon="🏏", layout="centered")
@@ -234,74 +234,43 @@ if generate and query:
     for line in clean_text(code_example).splitlines():
         pdf.multi_cell(0, 5, line)
 
-    # produce the PDF bytes exactly like your original flow
     pdf_output = pdf.output(dest="S").encode("latin1", "ignore")
 
-    # ---- PDF Preview (keep inline, but provide instant new-tab viewer) ----
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.subheader("📄 PDF Preview")
+   
+    # ---- PDF Preview (Chrome-safe + Instant Load) ----
+st.markdown("<br>", unsafe_allow_html=True)
+st.subheader("📄 PDF Preview")
 
-    # inline iframe (may be blocked in some browsers; kept for compatibility)
-    base64_pdf = base64.b64encode(pdf_output).decode("utf-8")
-    iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
-    st.markdown(iframe_html, unsafe_allow_html=True)
+# Save PDF to a temporary file
+with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
+    tmp_pdf.write(pdf_output)
+    tmp_pdf_path = tmp_pdf.name
 
-    st.markdown(
-        """
-        <div style="margin-top:8px;">
-            If embedded preview is blocked by your browser, use the button below to open the PDF in a new tab (loads instantly without refresh).
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Embed PDF inside the app
+with open(tmp_pdf_path, "rb") as f:
+    base64_pdf = base64.b64encode(f.read()).decode("utf-8")
 
-    # ---- Instant new-tab viewer using an HTML wrapper that creates a Blob (no refresh needed) ----
-    # Build a small HTML page that converts the base64 PDF to a Blob and navigates to it.
-    wrapper_html = f"""
-    <html><head><meta charset="utf-8"></head><body>
-    <script>
-    (function() {{
-        try {{
-            var b64 = "{base64_pdf}";
-            var binary = atob(b64);
-            var len = binary.length;
-            var bytes = new Uint8Array(len);
-            for (var i = 0; i < len; i++) {{
-                bytes[i] = binary.charCodeAt(i);
-            }}
-            var blob = new Blob([bytes], {{type: "application/pdf"}});
-            var url = URL.createObjectURL(blob);
-            // navigate to the blob URL to display the PDF
-            window.location.href = url;
-        }} catch (e) {{
-            document.body.innerText = "Failed to open PDF viewer: " + e;
-        }}
-    }})();
-    </script>
-    </body></html>
-    """
+iframe_html = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="700" type="application/pdf"></iframe>'
+st.markdown(iframe_html, unsafe_allow_html=True)
 
-    # encode the wrapper page and create a data:text/html link that opens a new tab
-    wrapper_b64 = base64.b64encode(wrapper_html.encode("utf-8")).decode("utf-8")
-    viewer_data_uri = f"data:text/html;base64,{wrapper_b64}"
+# Open PDF in new tab (now works instantly)
+pdf_url = f"file://{tmp_pdf_path}"
+open_link_html = f'''
+    <a href="{pdf_url}" target="_blank" rel="noopener noreferrer"
+       style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
+        🔍 Open PDF in new tab
+    </a>
+'''
+st.markdown(open_link_html, unsafe_allow_html=True)
 
-    open_link_html = f'''
-        <a href="{viewer_data_uri}" target="_blank" rel="noopener noreferrer"
-           style="display:inline-block;margin-top:6px;padding:8px 12px;background:#0d6efd;color:white;border-radius:8px;text-decoration:none;">
-            🔍 Open PDF in new tab (instant)
-        </a>
-        '''
-    st.markdown(open_link_html, unsafe_allow_html=True)
+# Download button
+st.download_button(
+    label="📥 Download PDF Report",
+    data=pdf_output,
+    file_name="ODI_Match_Report.pdf",
+    mime="application/pdf",
+)
 
-    # ---- Download Button (exactly as before) ----
-    st.download_button(
-        label="📥 Download PDF Report",
-        data=pdf_output,
-        file_name="ODI_Match_Report.pdf",
-        mime="application/pdf",
-    )
-
-    # ---- Cleanup ----
     try:
         os.remove(chart_path)
     except Exception:
